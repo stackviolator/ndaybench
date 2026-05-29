@@ -27,6 +27,9 @@ env/
 # patchwatch local data
 .patchwatch-data/
 
+# ndaybench run artifacts
+runs/
+
 # IDEs
 .vscode/
 .idea/

@@ -20,6 +20,16 @@ dependencies = [
 [project.scripts]
 patchwatch = "patchwatch.cli:app"
 bakery = "bakery.cli:app"
+ndaybench = "ndaybench.cli:app"
+
+[dependency-groups]
+dev = ["pytest>=8.3"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: hits real Proxmox infra; set NDAYBENCH_INTEGRATION=1 to enable",
+]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["uv_build>=0.10.9,<0.11.0"]

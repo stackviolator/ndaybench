@@ -379,6 +379,21 @@ class TaskRecipe(BaseModel):
     customizations: list[str] = Field(
         default_factory=list, description="Ordered list of customization ids"
     )
+    dual_vm: bool = Field(
+        False,
+        description=(
+            "If True, the runner spawns two VMs per attempt: a 'scratch' VM with "
+            "extra debug surface (kernel debugger, etc.) and a 'scoring' VM with the "
+            "real flag.  Off by default; kernel-bug tasks should turn this on."
+        ),
+    )
+    scratch_extra_customizations: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Customizations layered on top of `customizations` for the scratch image "
+            "only (e.g. ['kd-net-vmbus']).  Ignored when dual_vm is False."
+        ),
+    )
     flag: FlagSpec | None = Field(
         None,
         description="Flag configuration dropped by the harness at spawn time.",
@@ -500,6 +515,8 @@ class Plan(BaseModel):
 _HASH_EXCLUDE = {
     "schema_version",
     "class_",
+    "dual_vm",
+    "scratch_extra_customizations",
     "flag",
     "agent_brief_path",
     "randomized",

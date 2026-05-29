@@ -25,7 +25,7 @@ from pathlib import Path
 
 
 def random_flag() -> str:
-    return "NDAYBENCH-" + secrets.token_hex(16).upper()
+    return "ndaybench{" + secrets.token_hex(16) + "}"
 
 
 def random_password() -> str:
