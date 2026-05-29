@@ -504,13 +504,46 @@ class Builder:
         *,
         eject_first: bool = False,
     ) -> None:
-        """Shutdown -> wait stopped -> (optionally eject ISO) -> start -> wait agent."""
+        """Shutdown -> wait stopped -> (optionally eject ISO) -> start -> wait agent -> wait TI idle."""
         self._run(cmd_qm_guest_cmd_shutdown(vmid), dry_run)
         self._wait_stopped(vmid, dry_run)
         if eject_first:
             self._run(cmd_qm_eject_cdrom(vmid), dry_run)
         self._run(cmd_qm_start(vmid), dry_run)
         self._wait_for_agent(vmid, dry_run)
+        # Critical for large LCUs: TrustedInstaller keeps processing for many
+        # minutes after the guest agent reports ready.  Running the next
+        # PowerShell step (e.g. Add-WindowsCapability) while TI holds the
+        # servicing lock kills the guest agent.
+        self._wait_for_trusted_installer_idle(vmid, dry_run)
+
+    def _wait_for_trusted_installer_idle(
+        self, vmid: int, dry_run: bool, *, max_wait: int = 1200
+    ) -> None:
+        """Block until TrustedInstaller and TiWorker have exited (or max_wait)."""
+        if dry_run:
+            print(
+                f"[dry-run] (poll) wait until TrustedInstaller/TiWorker idle on {vmid} "
+                f"(max {max_wait}s)"
+            )
+            return
+        deadline = time.monotonic() + max_wait
+        ps = (
+            "$p = Get-Process TrustedInstaller, TiWorker -ErrorAction SilentlyContinue; "
+            "if ($p) { Write-Output 'busy' } else { Write-Output 'idle' }"
+        )
+        cmd = cmd_qm_guest_exec_powershell(vmid, ps)
+        while time.monotonic() < deadline:
+            try:
+                out = self._ssh_output(cmd)
+                if "idle" in out:
+                    return
+            except subprocess.CalledProcessError:
+                pass
+            time.sleep(15)
+        log.warning(
+            "TrustedInstaller still running after %ds; proceeding anyway", max_wait
+        )
 
     def _wait_for_agent(self, vmid: int, dry_run: bool) -> None:
         if dry_run:

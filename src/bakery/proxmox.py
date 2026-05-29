@@ -162,7 +162,7 @@ def cmd_qm_guest_exec_cmd(
 
 
 def cmd_qm_destroy(vmid: int) -> list[str]:
-    return ["qm", "destroy", str(vmid), "--purge", "1"]
+    return ["qm", "destroy", str(vmid), "--purge"]
 
 
 def cmd_genisoimage(
