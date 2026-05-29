@@ -1,0 +1,10 @@
+schema_version: 1
+id: win11-22h2-2025-10
+display_name: "Windows 11 22H2 — October 2025 LCU / Final 22H2 Update (KB5066793)"
+edition: win11-22h2-enterprise
+patches:
+  - kb: KB5066793
+    sha256: 02255a2612239c0b45449d755d1be108062e37457f5b8b3a402dba3f76bf6e6d
+    catalog_guid: "00000000-0000-0000-0000-000000000000"
+    url: "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/7a3fc5e6-826c-47a3-918f-82e6dd585929/public/windows11.0-kb5066793-x64_c2161f7373f0c06757ff5abdb607f2399d86d466.msu"
+target_build: "22621.6060"

@@ -1,0 +1,11 @@
+schema_version: 1
+id: win11-22h2-enterprise
+display_name: "Windows 11 22H2 Enterprise Evaluation"
+# Placeholder evaluation ISO URL — replace with the real MVLC/MSDN URL before use.
+iso_url: "https://software-static.download.prss.microsoft.com/sg/download/win11-22h2-enterprise-eval-x64.iso"
+iso_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+# WIM index 1 = Windows 11 Enterprise in the evaluation ISO
+wim_index: 1
+firmware: uefi
+disk_gb: 64
+os_family: windows

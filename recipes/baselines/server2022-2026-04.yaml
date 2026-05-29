@@ -1,0 +1,10 @@
+schema_version: 1
+id: server2022-2026-04
+display_name: "Windows Server 2022 — April 2026 Patch Tuesday (KB5082142)"
+edition: server2022-std
+patches:
+  - kb: KB5082142
+    sha256: b5a60b144f84ebf1215d4b0d14b584fbca8579f92e1cea62044a0b9cf81d9e7f
+    catalog_guid: fd522b7b-4adf-4335-a6fe-2ae3327e54cb
+    url: "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5082142-x64_0d2677e2b8f6550a978bd89e8991c4d3813ccf1f.msu"
+target_build: "20348.5020"

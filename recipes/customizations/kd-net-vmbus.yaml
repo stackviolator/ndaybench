@@ -1,0 +1,16 @@
+schema_version: 1
+id: kd-net-vmbus
+display_name: "KDNET via OpenVMM VMBus (no dedicated NIC required)"
+conflicts_with:
+  - secureboot-on
+requires:
+  # Sanity check: builder verifies that the edition was built with secure_boot=false.
+  # bcdedit /set {default} debug on is blocked when SB keys are enrolled in EFI vars.
+  - "secure_boot=false"
+steps:
+  - type: bcdedit
+    via: cmd
+    args: "/dbgsettings net hostip:192.168.1.212 port:50010 key:1.2.3.4"
+  - type: bcdedit
+    via: cmd
+    args: "/set {default} debug on"

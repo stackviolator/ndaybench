@@ -216,17 +216,22 @@ async def _fetch_targets(sug: SugClient, cve_id: str) -> tuple[Vulnerability, li
         raise typer.BadParameter(f"CVE {cve_id} not found in SUG")
     products = await sug.affected_products(cve_id)
     targets = pick_targets(products)
-    if not targets:
-        raise typer.BadParameter(
-            f"no Windows/SharePoint/Exchange x64 KB found in affectedProducts for {cve_id}"
-        )
     return cve, targets, len(products)
+
+
+_NO_TARGETS_REASON = "no Windows/SharePoint/Exchange x64 KB found in affectedProducts"
+
+
+def _require_targets(targets: list[TargetKb], cve_id: str) -> None:
+    """Acquire-side check: bail loudly if a CVE has no targets we can handle."""
+    if not targets:
+        raise typer.BadParameter(f"{_NO_TARGETS_REASON} for {cve_id}")
 
 
 def _ingest_payload(
     cve: Vulnerability, targets: list[TargetKb], *, n_affected_products: int
 ) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "cve_id": cve.cve_number,
         "title": cve.cve_title,
         "description": cve.description,
@@ -240,7 +245,11 @@ def _ingest_payload(
         "revision_number": cve.revision_number,
         "n_affected_products": n_affected_products,
         "targets": [asdict(t) for t in targets],
+        "applicable": bool(targets),
     }
+    if not targets:
+        payload["skip_reason"] = _NO_TARGETS_REASON
+    return payload
 
 
 async def _list_candidates(cve_id: str) -> dict[str, object]:
@@ -312,6 +321,7 @@ async def _acquire(
     ) as http:
         sug = SugClient(client=http)
         cve, targets, n_products = await _fetch_targets(sug, cve_id)
+        _require_targets(targets, cve_id)
 
         non_win_targets = [
             t for t in targets if t.family not in ("windows-client", "windows-server")

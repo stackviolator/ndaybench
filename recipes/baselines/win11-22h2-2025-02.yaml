@@ -1,0 +1,10 @@
+schema_version: 1
+id: win11-22h2-2025-02
+display_name: "Windows 11 22H2 — February 2025 LCU (KB5051989)"
+edition: win11-22h2-enterprise
+patches:
+  - kb: KB5051989
+    sha256: f8ed2640f5d0beec09eb8945dc527204d7c8942b491339de057b234f523b31f9
+    catalog_guid: "03624940-0732-4d06-9891-898d5af7558f"
+    url: "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/1a498d43-5bb1-4341-b7a8-6a025393173e/public/windows11.0-kb5051989-x64_ce6a034d2385b0623c3182cf396755ef5ad05483.msu"
+target_build: "22621.4890"

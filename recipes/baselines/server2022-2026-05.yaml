@@ -1,0 +1,10 @@
+schema_version: 1
+id: server2022-2026-05
+display_name: "Windows Server 2022 — May 2026 Patch Tuesday (KB5087545)"
+inherits: server2022-2026-04
+patches:
+  - kb: KB5087545
+    sha256: 9079d9f7be05089c21271c914370e44c6cd27d1b65e1ca29c1fa3a7213a36a74
+    catalog_guid: bbe51346-3515-45c9-a1d9-d9a823019127
+    url: "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/05/windows10.0-kb5087545-x64_2f3249fef5fecd0dd18dc47b79123ccf765c7133.msu"
+target_build: "20348.5139"

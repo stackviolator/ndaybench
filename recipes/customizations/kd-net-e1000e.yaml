@@ -1,0 +1,18 @@
+schema_version: 1
+id: kd-net-e1000e
+display_name: "KDNET via dedicated e1000e NIC (QEMU/Proxmox)"
+conflicts_with:
+  - secureboot-on
+requires:
+  - "secure_boot=false"
+steps:
+  - type: qm-config
+    args: "net1: e1000e,bridge=vmbr0"
+  - type: bcdedit
+    via: cmd
+    args: "/dbgsettings net hostip:192.168.1.212 port:50010 key:1.2.3.4"
+  - type: bcdedit
+    via: cmd
+    args: "/set {default} debug on"
+  - type: wait-for-reboot
+    reason: "Kernel debugger settings require a reboot to take effect"

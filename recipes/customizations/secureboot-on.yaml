@@ -1,0 +1,17 @@
+schema_version: 1
+id: secureboot-on
+display_name: "Secure Boot enabled (firmware-level — conflicts with KDNET)"
+# Enabling Secure Boot is an EditionRecipe-level concern (secure_boot: true on the
+# edition or a baseline override).  This customization exists solely to declare
+# conflicts so task recipes can express "SB on => no KDNET" cleanly.
+#
+# Empirical: bcdedit /set {default} debug on returns
+#   "The value is protected by Secure Boot policy."
+# when SB keys are enrolled in the EFI vars (pre-enrolled-keys=1).
+# Fresh EFI vars with pre-enrolled-keys=0 let the bcdedit succeed.
+conflicts_with:
+  - kd-net-vmbus
+  - kd-net-e1000e
+  - kd-serial
+requires: []
+steps: []

@@ -1,0 +1,10 @@
+schema_version: 1
+id: win11-22h2-2025-03
+display_name: "Windows 11 22H2 — March 2025 LCU (KB5053602)"
+edition: win11-22h2-enterprise
+patches:
+  - kb: KB5053602
+    sha256: f99081ab4e109fd007b4ddbf8bc56774d8bb9039bd95a5d82af3097e814b6398
+    catalog_guid: "cce6ab6a-e218-42a1-8a60-f85e875427be"
+    url: "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/cf6a62b9-4c7f-4703-aeb7-9ef0df5f29f1/public/windows11.0-kb5053602-x64_c1dc9c521f329ff91d92ab59713cb0f01959fa4e.msu"
+target_build: "22621.5039"

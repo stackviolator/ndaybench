@@ -1,0 +1,14 @@
+schema_version: 1
+cve_id: POC-WIN11-MARCH-2025
+edition: win11-22h2-enterprise
+baseline: win11-22h2-2025-03
+customizations:
+  - kd-net-vmbus
+metadata:
+  description: >
+    Second bakery roundtrip — proves the schema handles arbitrary Patch Tuesdays.
+    March 2025 Win11 22H2 LCU (KB5053602) → target build 22621.5039. Expected
+    different recipe hash + different cached raw artifact from the October 2025
+    PoC. Same kd-net-vmbus customization so we can still validate KDNET fires.
+  source_vmid_note: >
+    p620: clone source VMID 103 (Ludus Win11 22H2 OVMF template).

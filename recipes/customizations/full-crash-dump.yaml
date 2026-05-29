@@ -1,0 +1,42 @@
+schema_version: 1
+id: full-crash-dump
+display_name: "Full kernel crash dump + pagefile sizing"
+conflicts_with: []
+requires: []
+steps:
+  - type: registry-set
+    hive: HKLM
+    key: "SYSTEM\\CurrentControlSet\\Control\\CrashControl"
+    name: CrashDumpEnabled
+    kind: REG_DWORD
+    value: "1"
+  - type: registry-set
+    hive: HKLM
+    key: "SYSTEM\\CurrentControlSet\\Control\\CrashControl"
+    name: FilterPages
+    kind: REG_DWORD
+    value: "0"
+  - type: registry-set
+    hive: HKLM
+    key: "SYSTEM\\CurrentControlSet\\Control\\CrashControl"
+    name: DumpFile
+    kind: REG_SZ
+    value: "%SystemRoot%\\MEMORY.DMP"
+  - type: powershell-inline
+    script: |
+      # Size the pagefile to RAM + 1 GB to ensure a complete dump is captured.
+      $cs = Get-CimInstance Win32_ComputerSystem
+      $ram_mb = [math]::Round($cs.TotalPhysicalMemory / 1MB)
+      $pf_mb  = $ram_mb + 1024
+      $pf = Get-CimInstance Win32_PageFileSetting
+      if ($pf) {
+          Set-CimInstance -InputObject $pf -Property @{ InitialSize = $pf_mb; MaximumSize = $pf_mb }
+      } else {
+          New-CimInstance -ClassName Win32_PageFileSetting -Property @{
+              Name        = 'C:\pagefile.sys'
+              InitialSize = $pf_mb
+              MaximumSize = $pf_mb
+          }
+      }
+  - type: wait-for-reboot
+    reason: "Pagefile changes require a reboot"

@@ -1,0 +1,17 @@
+schema_version: 1
+cve_id: POC-WIN11-ROUNDTRIP
+edition: win11-22h2-enterprise
+baseline: win11-22h2-2025-10
+customizations:
+  - kd-net-vmbus
+metadata:
+  description: >
+    Round-trip PoC reproducing the hand-built pocshot-win11-2025-10-kdnet.raw
+    artifact via bakery. Bakes the final Win11 22H2 LCU (KB5066793) and
+    KDNET-over-VMBus dbgsettings + debug=on into a clean image. Target
+    consumer is OpenVMM with --net consomme; the host UDP listener at
+    192.168.1.212:50010 should receive MDBG packets within ~30s of guest
+    kernel boot.
+  source_vmid_note: >
+    For p620 specifically, clone source is VMID 103 (Ludus Win11 22H2 OVMF
+    template). Pass --source-vmid 103 to the bakery CLI.
