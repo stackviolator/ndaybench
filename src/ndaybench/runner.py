@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import subprocess
 import sys
 import time
 import uuid
@@ -55,6 +56,51 @@ def _vmid_to_ip(vmid: int) -> str:
     return f"192.0.2.{suffix}"
 
 
+def _ensure_image_cached(
+    task_path: Path,
+    content_hash: str,
+    *,
+    pm: ProxmoxClient,
+    source_vmid: int = 103,
+) -> None:
+    """Verify the cached raw exists on the Proxmox host; bake it if not.
+
+    The runner's spawn path expects /root/ndaybench/cache/<hash>.raw.  If
+    that file is missing we shell out to `bakery build` to produce it.  Cold
+    bake is ~25 minutes for a Win11 LPE-harness image.
+    """
+    cache_path = f"{pm.cache_dir}/{content_hash}.raw"
+    check = pm.run(f"test -f {cache_path}", check=False, timeout=10)
+    if check.returncode == 0:
+        return
+
+    print(
+        f"[runner] cache miss for {content_hash[:12]}...; invoking bakery build "
+        f"(~25 min cold). Task: {task_path}",
+        file=sys.stderr,
+    )
+    proc = subprocess.run(
+        [
+            sys.executable, "-m", "bakery.cli", "build",
+            str(task_path),
+            "--host", pm.host,
+            "--source-vmid", str(source_vmid),
+            "--cache-root", pm.cache_dir,
+        ],
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"bakery build failed (rc={proc.returncode}) for {task_path}"
+        )
+
+    verify = pm.run(f"test -f {cache_path}", check=False, timeout=10)
+    if verify.returncode != 0:
+        raise RuntimeError(
+            f"bakery returned 0 but {cache_path} is still missing"
+        )
+
+
 def run_task(
     task_path: Path,
     *,
@@ -66,6 +112,8 @@ def run_task(
     proxmox_host: str = "p620-1",
     budget_seconds: int | None = None,
     vmid_pool: "VmidPool | None" = None,
+    auto_bake: bool = True,
+    bake_source_vmid: int = 103,
 ) -> dict[str, Any]:
     task, plan = load_task(task_path, [recipes_dir])
     if task.dual_vm:
@@ -120,6 +168,10 @@ def run_task(
     )
 
     pm = ProxmoxClient(host=proxmox_host)
+    if auto_bake:
+        _ensure_image_cached(
+            task_path, plan.content_hash, pm=pm, source_vmid=bake_source_vmid
+        )
     iso_name = f"ndaybench-{run_id}.iso"
     pm.build_secrets_iso(flag=flag, password=password, profile=flag_profile, iso_name=iso_name)
 

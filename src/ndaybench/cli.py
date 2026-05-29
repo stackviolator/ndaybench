@@ -89,6 +89,26 @@ def list_runs(
 
 
 @app.command()
+def lint(
+    recipes_dir: Path = typer.Option(Path("recipes"), help="Directory of recipe YAMLs."),
+) -> None:
+    """Validate every recipe under recipes_dir.  Exits 1 if any errors found."""
+    from .lint import lint_recipes
+    issues = lint_recipes(recipes_dir)
+    if not issues:
+        typer.echo("OK: all recipes clean")
+        return
+
+    errors = [i for i in issues if i.severity == "error"]
+    warns = [i for i in issues if i.severity == "warn"]
+    for i in issues:
+        typer.echo(f"{i.severity.upper():<5} {i.recipe}: {i.message}")
+    typer.echo(f"\n{len(errors)} error(s), {len(warns)} warning(s)")
+    if errors:
+        raise typer.Exit(1)
+
+
+@app.command()
 def show(
     run_id: str = typer.Argument(...),
     db_path: Path = typer.Option(DEFAULT_DB, help="Path to the runs SQLite DB."),
