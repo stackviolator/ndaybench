@@ -1,0 +1,459 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+syntax = 'proto3';
+
+package vmservice;
+option go_package = "vmservice";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+
+service VM {
+    // CreateVM will create the virtual machine with the configuration in the
+    // CreateVMRequest. The virtual machine will be in a paused state power wise
+    // after CreateVM. ResumeVM can be called to transition the VM into a running state.
+    rpc CreateVM(CreateVMRequest) returns (google.protobuf.Empty);
+
+    // TeardownVM will release all associated resources from the VM and unblock the WaitVM call.
+    rpc TeardownVM(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+    // PauseVM will, if the virtual machine power state is in a running state, transition
+    // the state to paused. This is the same state power wise that the VM should be in after
+    // an initial CreateVM call.
+    rpc PauseVM(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+    // ResumeVM is used to transition a vm to a running state. This can be used to resume a VM that
+    // has had PauseVM called on it, or to start a VM that was created with CreateVM.
+    rpc ResumeVM(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+    // WaitVM will block until the VM is either in a halted state or has had all of it's resources freed
+    // via TeardownVM.
+    rpc WaitVM(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+    // CapabilitiesVM will return what capabilities the virtstack supports. This includes
+    // what guest operating systems are supported, what resources are supported, and if hot
+    // add/hot remove of a resource is supported.
+    rpc CapabilitiesVM(google.protobuf.Empty) returns (CapabilitiesVMResponse);
+
+    // PropertiesVM will take in a list of properties that the virtstack will return
+    // statistics for (memory, processors).
+    rpc PropertiesVM(PropertiesVMRequest) returns (PropertiesVMResponse);
+
+    // ModifyResource is a generic call to modify (add/remove/update) resources for a VM.
+    // This includes things such as block devices, network adapters, and pci devices.
+    rpc ModifyResource(ModifyResourceRequest) returns (google.protobuf.Empty);
+
+    // Quit will shutdown the process hosting the ttrpc server.
+    rpc Quit(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+    // ------- Lifecycle extensions (jlevere fork, phase 2) -------
+    // These mirror REPL commands that previously had no API. They all
+    // require a VM to be created and require Hyper-V enlightenments
+    // (`with_hv: true`) for Shutdown/PulseSaveRestore.
+
+    // Persist VM state to a snapshot directory. Requires file-backed
+    // guest memory; otherwise fails with a descriptive error.
+    rpc SaveSnapshot(SaveSnapshotRequest) returns (google.protobuf.Empty);
+
+    // Hard reset the VM. Equivalent to a power-cycle on real hardware.
+    rpc Reset(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+    // Graceful shutdown via the Hyper-V shutdown integration component.
+    // Requires the guest to have the IC running; otherwise the call
+    // completes but the guest may not honor it.
+    rpc Shutdown(ShutdownRequest) returns (google.protobuf.Empty);
+
+    // Inject an NMI on a specific virtual processor.
+    rpc Nmi(NmiRequest) returns (google.protobuf.Empty);
+
+    // Clear the guest's halt state (useful after a debugger break).
+    rpc ClearHalt(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+    // Pulse a save/restore cycle in-process — pause, save state, reset,
+    // restore. Primarily a debugging / development aid.
+    rpc PulseSaveRestore(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+    // ------- Debug & hot-mod extensions (jlevere fork, phase 3) -------
+
+    // Read a contiguous range of guest physical memory. The VM is paused
+    // briefly inside the worker for a consistent snapshot. Capped at 16 MiB
+    // per call; callers needing more should chunk.
+    rpc ReadMemory(ReadMemoryRequest) returns (ReadMemoryResponse);
+
+    // Write a contiguous range of guest physical memory.
+    rpc WriteMemory(WriteMemoryRequest) returns (google.protobuf.Empty);
+
+    // Dump VM state (VP registers + memory) to a .vmrs file. The worker
+    // pauses internally to collect a consistent snapshot.
+    rpc DumpState(DumpStateRequest) returns (google.protobuf.Empty);
+
+    // Hot-add a SCSI disk to the guest. Lighter than ModifyResource and
+    // supports DVDs.
+    rpc AddDisk(AddDiskRequest) returns (google.protobuf.Empty);
+
+    // Hot-remove a SCSI disk.
+    rpc RemoveDisk(RemoveDiskRequest) returns (google.protobuf.Empty);
+
+    // ------- Snapshot restore extension (jlevere fork, phase 5) -------
+
+    // Restore a VM from a snapshot directory previously written by
+    // SaveSnapshot. Must be called with no VM created (like CreateVm); it
+    // reconstructs the VM from the persisted config and saved state, backing
+    // guest RAM with the snapshot's memory.bin. The restored VM comes up
+    // PAUSED; call ResumeVm to continue execution. Fails if the snapshot's
+    // manifest (memory size, VP count, architecture) is incompatible with
+    // this build.
+    rpc RestoreSnapshot(RestoreSnapshotRequest) returns (google.protobuf.Empty);
+}
+
+// ------- Phase 3 request/response messages -------
+
+message ReadMemoryRequest {
+    // Guest physical address.
+    uint64 gpa = 1;
+    // Number of bytes to read. Server enforces a max of 16 MiB; requests
+    // exceeding that return INVALID_ARGUMENT.
+    uint64 size = 2;
+}
+
+message ReadMemoryResponse {
+    bytes data = 1;
+}
+
+message WriteMemoryRequest {
+    // Guest physical address.
+    uint64 gpa = 1;
+    // Data to write at gpa. Size cap mirrors ReadMemory.
+    bytes data = 2;
+}
+
+message DumpStateRequest {
+    // Filesystem path for the .vmrs dump file. The worker writes
+    // directly; the caller must ensure the directory exists and is
+    // writable by the openvmm process.
+    string path = 1;
+}
+
+message AddDiskRequest {
+    // Controller path (typically 0).
+    uint32 controller = 1;
+    // SCSI target on the controller (typically 0).
+    uint32 target = 2;
+    uint32 lun = 3;
+    // Backing file path on the host.
+    string host_path = 4;
+    bool read_only = 5;
+    // If true, exposed as a SCSI DVD device instead of a disk.
+    bool is_dvd = 6;
+}
+
+message RemoveDiskRequest {
+    uint32 controller = 1;
+    uint32 target = 2;
+    uint32 lun = 3;
+}
+
+// ------- Phase 2 request messages -------
+
+message SaveSnapshotRequest {
+    // Directory to write manifest.bin, state.bin, and memory.bin into.
+    // Must already exist and be on the same filesystem as the memory
+    // backing file (because memory.bin is created as a hardlink).
+    string dir = 1;
+}
+
+message RestoreSnapshotRequest {
+    // Snapshot directory previously populated by SaveSnapshot. Must contain
+    // manifest.bin, state.bin, memory.bin, and config.bin. (jlevere fork)
+    string dir = 1;
+}
+
+message ShutdownRequest {
+    enum ShutdownKind {
+        SHUTDOWN_KIND_POWER_OFF = 0;
+        SHUTDOWN_KIND_REBOOT = 1;
+        SHUTDOWN_KIND_HIBERNATE = 2;
+    }
+    ShutdownKind kind = 1;
+    // If true, the guest is told to shut down immediately without
+    // notifying applications. Maps to ShutdownParams.force.
+    bool force = 2;
+}
+
+message NmiRequest {
+    // VP index to inject the NMI on. 0 is BSP.
+    uint32 vp_index = 1;
+}
+
+//
+// VM lifecycle request/response
+//
+message DirectBoot {
+    string kernel_path = 1;
+    string initrd_path = 2;
+    string kernel_cmdline = 3;
+}
+
+message UEFI {
+    string firmware_path = 1;
+    string device_path = 2;
+    // Optional data to include for uefi boot. For Linux this could be used as the kernel
+    // commandline.
+    string optional_data = 3;
+}
+
+message MemoryConfig {
+    uint64 memory_mb = 1;
+    bool allow_overcommit = 2;
+    bool deferred_commit = 3;
+    bool hot_hint = 4;
+    bool cold_hint = 5;
+    bool cold_discard_hint = 6;
+    uint64 low_mmio_gap_in_mb = 7;
+    uint64 high_mmio_base_in_mb = 8;
+    uint64 high_mmio_gap_in_mb = 9;
+}
+
+message ProcessorConfig {
+    uint32 processor_count = 1;
+    uint32 processor_weight = 2;
+    uint32 processor_limit = 3;
+}
+
+message DevicesConfig {
+    repeated SCSIDisk scsi_disks = 1;
+    repeated VPMEMDisk vpmem_disks = 2;
+    repeated NICConfig nic_config = 3;
+    // When we know what information we need to assign a pci device on Linux,
+    // have a oneof here named PCIDevice with WindowsPCIDevice and LinuxPCIDevice
+    // housed.
+    repeated WindowsPCIDevice windows_device = 4;
+    repeated VirtioFSConfig virtiofs_config = 5;
+    VirtioConsoleConfig virtio_console = 6;
+}
+
+message VirtioConsoleConfig {
+    // Path to a named pipe or Unix domain socket for the console backend.
+    string socket_path = 1;
+    // When true, connect to an existing pipe/socket at socket_path as a client
+    // instead of creating a new server listener. Used when the host has already
+    // created the socket/pipe.
+    bool connect = 2;
+}
+
+message VMConfig {
+    MemoryConfig memory_config = 1;
+    ProcessorConfig processor_config = 2;
+    DevicesConfig devices_config = 3;
+    SerialConfig serial_config = 4;
+    oneof BootConfig {
+        DirectBoot direct_boot = 5;
+        UEFI uefi = 6;
+    }
+    WindowsOptions windows_options = 7;
+    // Optional k:v extra data. Up to the virtstack for how to interpret this.
+    map<string, string> extra_data = 8;
+    HVSocketConfig hvsocket_config = 9;
+
+    // Optional path to a file used to back guest RAM. When set, guest memory
+    // is backed by this file instead of anonymous memory. This is REQUIRED
+    // for SaveSnapshot: the snapshot's memory.bin is created as a hardlink of
+    // this file, so the file must live on the same filesystem as the snapshot
+    // directory. When unset, guest RAM is anonymous and snapshotting is
+    // unavailable. (jlevere fork, phase 5)
+    string memory_backing_file = 10;
+}
+
+// WindowsOptions contains virtual machine configurations that are only present on a Windows host.
+message WindowsOptions {
+    uint64 cpu_group_id = 1;
+}
+
+message SerialConfig {
+    message Config {
+        uint32 port = 1;
+        // Uds to relay serial console output to.
+        string socket_path = 2;
+        // When true, connect to an existing pipe/socket as a client instead of
+        // creating a new server listener.
+        bool connect = 3;
+    }
+    repeated Config ports = 3;
+}
+
+message HVSocketConfig {
+    string path = 1;
+}
+
+message CreateVMRequest {
+    VMConfig config = 1;
+    // Optional ID to be used by the VM service in log messages. It's up to the
+    // server/virtstack to make use of this field. Useful for debugging to be able to
+    // correlate events in the virtstack for a given vm that the client launched.
+    string log_id = 2;
+}
+
+message MemoryStats {
+    uint64 working_set_bytes = 1;
+    uint64 available_memory = 2;
+    uint64 reserved_memory = 3;
+    uint64 assigned_memory = 4;
+}
+
+message ProcessorStats {
+    uint64 total_runtime_ns = 1;
+}
+
+message PropertiesVMRequest {
+    enum PropertiesType {
+        Memory = 0;
+        Processor = 1;
+    }
+    repeated PropertiesType types = 1;
+}
+
+// VM lifecycle state, reported by PropertiesVMResponse.state.
+//
+// Transitions:
+//   UNINITIALIZED -> PAUSED        (via CreateVm; VM starts paused per CreateVm docs)
+//   PAUSED        -> RUNNING       (via ResumeVm)
+//   RUNNING       -> PAUSED        (via PauseVm)
+//   PAUSED/RUNNING -> HALTED       (guest power off / crash / triple fault)
+//   any           -> UNINITIALIZED (via TeardownVm)
+enum VmState {
+    VM_STATE_UNINITIALIZED = 0;
+    VM_STATE_PAUSED = 1;
+    VM_STATE_RUNNING = 2;
+    VM_STATE_HALTED = 3;
+}
+
+message PropertiesVMResponse {
+    MemoryStats memory_stats = 1;
+    ProcessorStats processor_stats = 2;
+    VmState state = 3;
+    // Populated when state == VM_STATE_HALTED; explains why the guest halted
+    // (e.g. "PowerOff", "TripleFault"). Empty otherwise.
+    string halt_reason = 4;
+}
+
+message CapabilitiesVMResponse {
+    enum Resource {
+        Vpmem = 0;
+        Scsi = 1;
+        Vpci = 2;
+        Plan9 = 3;
+        VMNic = 4;
+        Memory = 5;
+        Processor = 6;
+    }
+
+    message SupportedResource {
+        bool Add = 1;
+        bool Remove = 2;
+        bool Update = 3;
+        Resource resource = 4;
+    }
+
+    enum SupportedGuestOS {
+        Windows = 0;
+        Linux = 1;
+    }
+    repeated SupportedResource supported_resources = 1;
+    repeated SupportedGuestOS supported_guest_os = 2;
+}
+
+//
+// Modify existing VM request/response
+//
+enum ModifyType {
+    ADD = 0;
+    REMOVE = 1;
+    UPDATE = 2;
+}
+
+enum DiskType {
+    SCSI_DISK_TYPE_VHD1 = 0;
+    SCSI_DISK_TYPE_VHDX = 1;
+    SCSI_DISK_TYPE_PHYSICAL = 2;
+}
+
+message SCSIDisk {
+    uint32 controller = 1;
+    uint32 lun = 2;
+    string host_path = 3;
+    DiskType type = 4;
+    bool read_only = 5;
+}
+
+message VPMEMDisk {
+    string host_path = 1;
+    DiskType type = 2;
+    bool read_only = 3;
+}
+
+message NICConfig {
+    string nic_id = 1; // GUID
+    string mac_address = 3; // 12-34-56-78-9A-BC
+    string legacy_switch_id = 4; // GUID, used only with legacy_port_id below
+    // Optional friendly name for the adapter. Might be useful to show up in logs.
+    string nic_name = 5;
+    oneof backend {
+        string legacy_port_id = 2; // legacy, GUID, Windows only
+        DioBackend dio = 6;
+        TapBackend tap = 7;
+        ConsommeBackend consomme = 8;
+    }
+}
+
+message DioBackend {
+    string switch_id = 1;   // GUID
+    string port_id = 2;     // GUID
+}
+
+message TapBackend {
+    string name = 1;
+}
+
+message ConsommeBackend {
+    // Optional CIDR for the guest network (e.g. "10.0.0.0/24").
+    // If empty, a default is used.
+    string cidr = 1;
+}
+
+message WindowsPCIDevice {
+    // e.g. PCIP\\VEN_10DE&DEV_13F2&SUBSYS_115E10DE&REV_A1\\6&17F903&0&00400000
+    string instance_id = 1;
+}
+
+message VirtioFSConfig {
+    string tag = 1;
+    string root_path = 2;
+}
+
+message ModifyMemoryRequest {
+    uint64 memory_mb = 1;
+}
+
+message ModifyProcessorRequest {
+    // Index of the processor to add/remove
+    uint32 processor_index = 1;
+}
+
+message ModifyProcessorConfigRequest {
+    uint32 processor_weight = 1;
+    uint32 processor_limit = 2;
+}
+
+message ModifyResourceRequest {
+    ModifyType type = 1;
+    oneof resource {
+        ModifyProcessorRequest processor = 2;
+        ModifyProcessorConfigRequest processor_config = 3;
+        ModifyMemoryRequest memory = 4;
+        SCSIDisk scsi_disk = 5;
+        VPMEMDisk vpmem_disk = 6;
+        NICConfig nic_config = 7;
+        WindowsPCIDevice windows_device = 8;
+    }
+}

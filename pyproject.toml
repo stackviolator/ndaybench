@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.14.3",
+    "grpcio>=1.80.0",
     "httpx>=0.28.1",
     "lxml>=6.1.1",
     "olefile>=0.47",
@@ -23,7 +24,10 @@ bakery = "bakery.cli:app"
 ndaybench = "ndaybench.cli:app"
 
 [dependency-groups]
-dev = ["pytest>=8.3"]
+dev = [
+    "grpcio-tools>=1.80.0",
+    "pytest>=8.3",
+]
 
 [tool.pytest.ini_options]
 markers = [
