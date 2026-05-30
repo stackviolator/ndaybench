@@ -482,18 +482,34 @@ sleep 1
         h = hashlib.sha256(run_id.encode()).hexdigest()[:8]
         return f"ndb{h}"
 
-    def _wait_lease(self, vm: OpenVmmVm, *, timeout: int) -> str:
+    def _wait_lease(self, vm: OpenVmmVm, *, timeout: int, verify: bool = True) -> str:
+        """Return the guest's current IP for our MAC.
+
+        The lease file can hold MORE than one entry for a MAC (a stale pre-restore
+        lease plus a fresh one after the guest re-DHCPs when netvsc re-inits on
+        restore).  So take the *freshest* (highest dnsmasq expiry, field 1) and,
+        when ``verify``, only return an IP that actually answers SSH -- never a
+        stale address.  This is the bug that made fast-restore look broken.
+        """
         c = self.config
         deadline = time.monotonic() + timeout
+        last_seen: list[str] = []
         while time.monotonic() < deadline:
+            # all IPs for our MAC, freshest expiry first
             out = self._host_run(
-                f"awk '$2==\"{vm.mac_colon}\" {{print $3}}' {shlex.quote(c.leases_file)} "
-                "2>/dev/null || true", check=False,
-            ).stdout.strip()
-            if out:
-                return out.splitlines()[-1]
+                f"awk '$2==\"{vm.mac_colon}\" {{print $1, $3}}' {shlex.quote(c.leases_file)} "
+                f"2>/dev/null | sort -rn | awk '{{print $2}}'", check=False,
+            ).stdout
+            ips = [ln.strip() for ln in out.splitlines() if ln.strip()]
+            last_seen = ips
+            for ip in ips:
+                if not verify or self._guest_ssh_ok(ip):
+                    return ip
             time.sleep(4)
-        raise OpenVmmError(f"VM {vm.run_id} got no DHCP lease for {vm.mac} in {timeout}s")
+        raise OpenVmmError(
+            f"VM {vm.run_id}: no SSH-reachable lease for {vm.mac} in {timeout}s "
+            f"(leases seen: {last_seen or 'none'})"
+        )
 
     def _guest_ssh_cmd(self, ip: str, remote: str) -> str:
         c = self.config
