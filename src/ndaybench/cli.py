@@ -21,7 +21,7 @@ def run(
     host: str = typer.Option("p620-1", help="OpenVMM host name or IP."),
     keep_vms: bool = typer.Option(False, help="Skip VM teardown (for debugging)."),
     budget_seconds: int | None = typer.Option(
-        None, "--budget", help="Per-run wall-clock budget (default: task.grader.max_attempt_seconds or 5400s)."
+        None, "--budget", help="Per-run wall-clock budget, seconds (default: task budget)."
     ),
 ) -> None:
     """Spawn a fresh VM for TASK, run AGENT against it, grade, record."""
