@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.14.3",
+    "grpcio>=1.80.0",
     "httpx>=0.28.1",
     "lxml>=6.1.1",
     "olefile>=0.47",
@@ -23,7 +24,10 @@ bakery = "bakery.cli:app"
 ndaybench = "ndaybench.cli:app"
 
 [dependency-groups]
-dev = ["pytest>=8.3"]
+dev = [
+    "grpcio-tools>=1.80.0",
+    "pytest>=8.3",
+]
 
 [tool.pytest.ini_options]
 markers = [
@@ -38,9 +42,14 @@ build-backend = "uv_build"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["*_pb2.py", "*_pb2_grpc.py"]  # generated gRPC stubs
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Typer requires typer.Option/Argument calls in parameter defaults.
+"**/cli.py" = ["B008"]
 
 [tool.ruff.format]
 quote-style = "double"

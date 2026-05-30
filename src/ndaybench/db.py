@@ -72,7 +72,8 @@ def create_run(
 ) -> None:
     conn.execute(
         "INSERT INTO runs "
-        "(run_id, cve_id, task_recipe, agent_id, flag, agent_password, flag_profile, started_at, run_dir) "
+        "(run_id, cve_id, task_recipe, agent_id, flag, agent_password, "
+        "flag_profile, started_at, run_dir) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             run_id,

@@ -1,8 +1,9 @@
-"""Parallel sweep driver for ndaybench runs.
+"""Parallel sweep driver for ndaybench runs (OpenVMM backend).
 
-Owns VMID/IP allocation across a fleet of concurrent worker threads.  Each
-worker drives one `run_task` invocation.  Threads are appropriate here because
-nearly all time is spent in subprocess SSH calls (GIL not a bottleneck).
+Runs many attempts of a task concurrently.  Each worker drives one `run_task`
+with a unique (grpc_port, vnc_port) pair from a thread-safe pool; the run_id
+already gives each VM a unique MAC + tap, so concurrent runs are isolated.
+Threads are fine here — nearly all time is in subprocess SSH/gRPC calls.
 """
 
 from __future__ import annotations
@@ -13,49 +14,40 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .openvmm import OpenVmmClient, OpenVmmConfig
 from .runner import run_task
-from .vm import ProxmoxClient, VmError
+
+
+class PoolExhausted(RuntimeError):
+    pass
 
 
 @dataclass
-class VmidPool:
-    """Thread-safe VMID allocator for concurrent runs.
+class PortPool:
+    """Thread-safe allocator of (grpc_port, vnc_port) pairs for concurrent runs."""
 
-    On construction the pool is seeded with [lo..hi] minus whatever is already
-    in `qm list` on the Proxmox host.  Workers `acquire()` to reserve and
-    `release()` to return a VMID once their VM is destroyed.
-    """
-
-    lo: int = 9200
-    hi: int = 9252
-    _available: list[int] = field(default_factory=list)
+    grpc_base: int = 18060
+    vnc_base: int = 5930
+    size: int = 16
+    _free: list[tuple[int, int]] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    @classmethod
-    def from_proxmox(cls, pm: ProxmoxClient, lo: int = 9200, hi: int = 9252) -> "VmidPool":
-        out = pm.run("qm list", check=False).stdout
-        taken = set()
-        for line in out.splitlines()[1:]:
-            parts = line.split()
-            if parts and parts[0].isdigit():
-                taken.add(int(parts[0]))
-        avail = [v for v in range(lo, hi + 1) if v not in taken]
-        return cls(lo=lo, hi=hi, _available=avail)
+    def __post_init__(self) -> None:
+        if not self._free:
+            self._free = [
+                (self.grpc_base + i, self.vnc_base + i) for i in range(self.size)
+            ]
 
-    def acquire(self) -> int:
+    def acquire(self) -> tuple[int, int]:
         with self._lock:
-            if not self._available:
-                raise VmError(f"VmidPool exhausted (range [{self.lo},{self.hi}])")
-            return self._available.pop(0)
+            if not self._free:
+                raise PoolExhausted("port pool exhausted")
+            return self._free.pop(0)
 
-    def release(self, vmid: int) -> None:
+    def release(self, ports: tuple[int, int]) -> None:
         with self._lock:
-            if vmid not in self._available:
-                self._available.append(vmid)
-
-    def size(self) -> int:
-        with self._lock:
-            return len(self._available)
+            if ports not in self._free:
+                self._free.append(ports)
 
 
 def sweep(
@@ -65,31 +57,37 @@ def sweep(
     runs: int = 1,
     parallelism: int = 1,
     budget_seconds: int | None = None,
-    proxmox_host: str = "p620-1",
+    host: str = "p620-1",
     recipes_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Run `runs` attempts of `task` in parallel (up to `parallelism` at a time).
+    """Run `runs` attempts of `task` in parallel (up to `parallelism` at once).
 
     Returns the list of score dicts (same shape `run_task` returns), in
     completion order.
     """
-    pm = ProxmoxClient(host=proxmox_host)
-    pool = VmidPool.from_proxmox(pm)
-    if pool.size() < parallelism:
-        raise VmError(
-            f"VmidPool has {pool.size()} free VMIDs but parallelism={parallelism}"
-        )
+    pool = PortPool(size=max(parallelism, 1))
+
+    # Bring up the shared bridge + CoW storage once, so concurrent workers don't
+    # race on `ip link add` / `mount` / base-seed.
+    client = OpenVmmClient(config=OpenVmmConfig(host=host))
+    client.ensure_network()
+    client.ensure_storage()
 
     def worker() -> dict[str, Any]:
-        kwargs: dict[str, Any] = {
-            "agent_name": agent_name,
-            "proxmox_host": proxmox_host,
-            "budget_seconds": budget_seconds,
-            "vmid_pool": pool,
-        }
-        if recipes_dir is not None:
-            kwargs["recipes_dir"] = recipes_dir
-        return run_task(task_path, **kwargs)
+        grpc_port, vnc_port = pool.acquire()
+        try:
+            kwargs: dict[str, Any] = {
+                "agent_name": agent_name,
+                "host": host,
+                "budget_seconds": budget_seconds,
+                "grpc_port": grpc_port,
+                "vnc_port": vnc_port,
+            }
+            if recipes_dir is not None:
+                kwargs["recipes_dir"] = recipes_dir
+            return run_task(task_path, **kwargs)
+        finally:
+            pool.release((grpc_port, vnc_port))
 
     results: list[dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=parallelism) as ex:
