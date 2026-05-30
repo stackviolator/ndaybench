@@ -65,10 +65,13 @@ class OpenVmmError(RuntimeError):
     pass
 
 
-# The golden base built once on ext4; seeded into the CoW mount on first use.
-GOLDEN_BASE = (
-    "/root/ndaybench/openvmm/images/ndaybench-win11-22h2-ent-base-20260529.img"
-)
+# All OpenVMM side-branch artifacts live under this isolated host root, kept
+# OUT of /root/ndaybench (the main-branch ndaybench repo checkout) so we never
+# stomp it and our files don't get reaped by its cleanup/git ops.
+NDB_ROOT = "/root/openvmm-ndb"
+# Clean (debug-free, no KDNET) Win11 22H2 base, built hands-off via the
+# no-prompt ISO bakery (2026-05-30).  Seeded into the CoW mount on first use.
+GOLDEN_BASE = f"{NDB_ROOT}/images/ndaybench-win11-22h2-base-clean-20260530.img"
 DEFAULT_UEFI_FD = (
     "/root/openvmm/.packages/hyperv.uefi.mscoreuefi.x64.RELEASE"
     "/MsvmX64/RELEASE_VS2022/FV/MSVM.fd"
@@ -76,8 +79,8 @@ DEFAULT_UEFI_FD = (
 # CoW root: an XFS-reflink loopback (ext4 has no reflink).  base image + all
 # per-run disks + snapshots live here so cloning is an instant block-shared
 # `cp --reflink`.  Self-contained (one file on ext4), isolated from co-tenants.
-COW_MNT = "/root/ndaybench/openvmm/cow"
-COW_FILE = "/root/ndaybench/openvmm/cow.xfs"
+COW_MNT = f"{NDB_ROOT}/cow"
+COW_FILE = f"{NDB_ROOT}/cow.xfs"
 COW_SIZE = "400G"
 
 
@@ -511,14 +514,17 @@ sleep 1
             f"(leases seen: {last_seen or 'none'})"
         )
 
-    def _guest_ssh_cmd(self, ip: str, remote: str) -> str:
+    def _guest_ssh_cmd(self, ip: str, remote: str, *,
+                       user: str | None = None, password: str | None = None) -> str:
         c = self.config
+        u = user or c.guest_user
+        pw = password if password is not None else c.guest_password
         return (
-            f"sshpass -p {shlex.quote(c.guest_password)} "
+            f"sshpass -p {shlex.quote(pw)} "
             f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
             f"-o LogLevel=ERROR -o ConnectTimeout=10 "
             f"-o PreferredAuthentications=password -o PubkeyAuthentication=no "
-            f"{shlex.quote(c.guest_user)}@{ip} {shlex.quote(remote)}"
+            f"{shlex.quote(u)}@{ip} {shlex.quote(remote)}"
         )
 
     def _guest_ssh_ok(self, ip: str) -> bool:
@@ -540,18 +546,23 @@ sleep 1
         raise OpenVmmError(f"SSH to {vm.ip} never came up in {timeout}s")
 
     def guest_exec(self, vm: OpenVmmVm, cmd: str, *, timeout: int = 60,
-                   check: bool = True) -> dict[str, object]:
+                   check: bool = True, user: str | None = None,
+                   password: str | None = None) -> dict[str, object]:
+        """Run *cmd* in the guest over SSH. Defaults to the config (admin) creds;
+        pass user/password to run as the low-priv agent account."""
         if not vm.ip:
             raise OpenVmmError("vm has no IP")
-        proc = self._host_run(self._guest_ssh_cmd(vm.ip, cmd),
-                              timeout=timeout + 20, check=check)
+        proc = self._host_run(
+            self._guest_ssh_cmd(vm.ip, cmd, user=user, password=password),
+            timeout=timeout + 20, check=check)
         return {"stdout": proc.stdout, "stderr": proc.stderr, "exit_code": proc.returncode}
 
     def guest_powershell(self, vm: OpenVmmVm, script: str, *, timeout: int = 60,
-                         check: bool = True) -> dict[str, object]:
+                         check: bool = True, user: str | None = None,
+                         password: str | None = None) -> dict[str, object]:
         enc = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
         return self.guest_exec(vm, f"powershell -NoProfile -EncodedCommand {enc}",
-                               timeout=timeout, check=check)
+                               timeout=timeout, check=check, user=user, password=password)
 
 
 # ---------------------------------------------------------------------------

@@ -18,7 +18,7 @@ def run(
     task: Path = typer.Argument(..., help="Path to a task recipe YAML."),
     agent: str = typer.Option("stub", help="Agent name (currently only 'stub')."),
     recipes_dir: Path = typer.Option(Path("recipes"), help="Directory of recipe YAMLs."),
-    proxmox_host: str = typer.Option("p620-1", help="Proxmox host name or IP."),
+    host: str = typer.Option("p620-1", help="OpenVMM host name or IP."),
     keep_vms: bool = typer.Option(False, help="Skip VM teardown (for debugging)."),
     budget_seconds: int | None = typer.Option(
         None, "--budget", help="Per-run wall-clock budget (default: task.grader.max_attempt_seconds or 5400s)."
@@ -29,7 +29,7 @@ def run(
         task,
         agent_name=agent,
         recipes_dir=recipes_dir,
-        proxmox_host=proxmox_host,
+        host=host,
         keep_vms=keep_vms,
         budget_seconds=budget_seconds,
     )

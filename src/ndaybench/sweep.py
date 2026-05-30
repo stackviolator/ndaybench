@@ -32,7 +32,7 @@ class VmidPool:
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     @classmethod
-    def from_proxmox(cls, pm: ProxmoxClient, lo: int = 9200, hi: int = 9252) -> "VmidPool":
+    def from_proxmox(cls, pm: ProxmoxClient, lo: int = 9200, hi: int = 9252) -> VmidPool:
         out = pm.run("qm list", check=False).stdout
         taken = set()
         for line in out.splitlines()[1:]:

@@ -1,11 +1,13 @@
-"""Agent-facing tools for ndaybench runs.
+"""Agent-facing tools for ndaybench runs (OpenVMM backend).
 
 Each tool takes a `RunContext` (which holds the VMs, ground-truth flag, run dir)
 and tool-specific kwargs, logs the call+result to `tool_calls.jsonl`, and returns
 a serializable dict.
 
-For v0 the tool surface is single-VM only (dual-VM lands when CVE-2024-30051
-becomes the second task).  The `vm` keyword is plumbed but defaults to "sole".
+Guest access goes through `OpenVmmClient` over SSH.  Tools run as the low-priv
+*agent* account (the LPE target user); the harness setup elsewhere runs as the
+admin account.  For v0 the tool surface is single-VM only (the `vm` keyword is
+plumbed but defaults to "sole").
 """
 
 from __future__ import annotations
@@ -16,29 +18,34 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .openvmm import OpenVmmClient, OpenVmmVm, utcnow_iso
 from .oracle import grade
-from .vm import GuestSsh, ProxmoxClient, utcnow_iso
 
 
 @dataclass
 class VmContext:
     role: str           # "sole" | "scoring" | "scratch"
-    vmid: int
-    ip: str
-    proxmox: ProxmoxClient
-    agent_user: str = "agent"
+    vm: OpenVmmVm
+    client: OpenVmmClient
+    agent_user: str = "victim"
     agent_password: str = ""
-    snapshot_name: str | None = None
+
+    def exec(self, cmd: str, *, timeout: int = 60) -> dict[str, Any]:
+        """Run `cmd` in the guest as the agent (low-priv) user."""
+        return self.client.guest_exec(
+            self.vm, cmd, timeout=timeout, check=False,
+            user=self.agent_user, password=self.agent_password,
+        )
+
+    def powershell(self, script: str, *, timeout: int = 60) -> dict[str, Any]:
+        return self.client.guest_powershell(
+            self.vm, script, timeout=timeout, check=False,
+            user=self.agent_user, password=self.agent_password,
+        )
 
     @property
-    def ssh(self) -> GuestSsh:
-        # GuestSsh is a thin wrapper; cheap to rebuild per call.
-        return GuestSsh(
-            proxmox=self.proxmox,
-            vm_ip=self.ip,
-            user=self.agent_user,
-            password=self.agent_password,
-        )
+    def snapshot_name(self) -> str | None:
+        return self.vm.snapshot_name
 
 
 class BudgetExceeded(RuntimeError):
@@ -49,7 +56,7 @@ class BudgetExceeded(RuntimeError):
 class RunContext:
     run_id: str
     run_dir: Path
-    proxmox: ProxmoxClient
+    client: OpenVmmClient
     expected_flag: str
     vms: dict[str, VmContext]
     deadline_monotonic: float | None = field(default=None)
@@ -67,9 +74,7 @@ class RunContext:
             return
         import time as _time
         if _time.monotonic() > self.deadline_monotonic:
-            raise BudgetExceeded(
-                f"wall-clock budget exceeded for run {self.run_id}"
-            )
+            raise BudgetExceeded(f"wall-clock budget exceeded for run {self.run_id}")
 
 
 # --- tool implementations ---------------------------------------------------
@@ -80,10 +85,9 @@ def _redact(s: str, max_len: int = 4000) -> str:
 
 
 def ssh_exec(ctx: RunContext, *, cmd: str, vm: str = "sole", timeout: int = 60) -> dict[str, Any]:
-    """Run `cmd` on the guest VM as the `agent` user (default Windows shell: cmd.exe)."""
+    """Run `cmd` on the guest VM as the agent user (default Windows shell: cmd.exe)."""
     ctx.check_budget()
-    vmctx = ctx.vms[vm]
-    result = vmctx.ssh.exec(cmd, timeout=timeout)
+    result = ctx.vms[vm].exec(cmd, timeout=timeout)
     out = {
         "stdout": _redact(str(result["stdout"])),
         "stderr": _redact(str(result["stderr"])),
@@ -98,17 +102,16 @@ def push_file(
 ) -> dict[str, Any]:
     """Write the base64-decoded bytes to `remote_path` on the guest VM."""
     ctx.check_budget()
-    vmctx = ctx.vms[vm]
-    # We embed the b64 in a PowerShell one-liner; the guest writes the bytes out.
     ps = (
         f"$d=[Convert]::FromBase64String('{content_b64}'); "
         f"$p='{remote_path}'; "
         f"$dir=Split-Path $p -Parent; "
-        f"if ($dir -and -not (Test-Path $dir)) {{ New-Item -ItemType Directory -Path $dir -Force | Out-Null }}; "
+        f"if ($dir -and -not (Test-Path $dir)) "
+        f"{{ New-Item -ItemType Directory -Path $dir -Force | Out-Null }}; "
         f"[IO.File]::WriteAllBytes($p, $d); "
         f"Write-Host \"wrote $($d.Length) bytes to $p\""
     )
-    result = vmctx.ssh.exec(f'powershell -NoProfile -Command "{ps}"', timeout=60)
+    result = ctx.vms[vm].powershell(ps, timeout=60)
     out = {
         "stdout": _redact(str(result["stdout"])),
         "stderr": _redact(str(result["stderr"])),
@@ -126,13 +129,12 @@ def push_file(
 def pull_file(ctx: RunContext, *, remote_path: str, vm: str = "sole") -> dict[str, Any]:
     """Read `remote_path` on the guest VM and return it base64-encoded."""
     ctx.check_budget()
-    vmctx = ctx.vms[vm]
     ps = (
         f"$b=[IO.File]::ReadAllBytes('{remote_path}'); "
         f"[Convert]::ToBase64String($b)"
     )
-    result = vmctx.ssh.exec(f'powershell -NoProfile -Command "{ps}"', timeout=60)
-    out = {
+    result = ctx.vms[vm].powershell(ps, timeout=60)
+    out: dict[str, Any] = {
         "stderr": _redact(str(result["stderr"])),
         "exit_code": result["exit_code"],
     }
@@ -140,8 +142,7 @@ def pull_file(ctx: RunContext, *, remote_path: str, vm: str = "sole") -> dict[st
         content_b64 = str(result["stdout"]).strip()
         out["content_b64"] = content_b64
         try:
-            decoded = base64.b64decode(content_b64)
-            out["bytes_read"] = len(decoded)
+            out["bytes_read"] = len(base64.b64decode(content_b64))
         except Exception as exc:  # noqa: BLE001
             out["decode_error"] = str(exc)
     else:
@@ -153,36 +154,28 @@ def pull_file(ctx: RunContext, *, remote_path: str, vm: str = "sole") -> dict[st
 def vm_reboot(ctx: RunContext, *, vm: str = "sole") -> dict[str, Any]:
     ctx.check_budget()
     vmctx = ctx.vms[vm]
-    ctx.proxmox.reboot(vmctx.vmid)
-    ctx.proxmox.wait_guest_agent(vmctx.vmid)
-    # Static IP must be re-applied (Windows clears it on boot in some cases —
-    # but our netsh config persists across reboot, so this is just a guard).
-    vmctx.ssh.wait_ready(timeout=120)
-    out = {"vmid": vmctx.vmid, "status": "ready"}
+    ctx.client.reboot(vmctx.vm)
+    out = {"ip": vmctx.vm.ip, "status": "ready"}
     ctx.log("vm_reboot", {"vm": vm}, out)
     return out
 
 
 def vm_revert(ctx: RunContext, *, vm: str = "sole") -> dict[str, Any]:
-    """Roll back the VM to its post-init snapshot."""
+    """Roll the VM back to its pre-agent snapshot."""
     ctx.check_budget()
     vmctx = ctx.vms[vm]
     if not vmctx.snapshot_name:
         out = {"error": "no snapshot taken for this VM"}
         ctx.log("vm_revert", {"vm": vm}, out)
         return out
-    ctx.proxmox.rollback(vmctx.vmid, vmctx.snapshot_name)
-    ctx.proxmox.wait_guest_agent(vmctx.vmid)
-    vmctx.ssh.wait_ready(timeout=120)
-    out = {"vmid": vmctx.vmid, "snapshot": vmctx.snapshot_name, "status": "reverted"}
+    ctx.client.restore(vmctx.vm, vmctx.snapshot_name)
+    out = {"ip": vmctx.vm.ip, "snapshot": vmctx.snapshot_name, "status": "reverted"}
     ctx.log("vm_revert", {"vm": vm}, out)
     return out
 
 
 def submit(ctx: RunContext, *, flag: str) -> dict[str, Any]:
     """Submit a candidate flag to the oracle.  Ends the episode."""
-    # No budget check — even an overdue agent should be able to submit
-    # whatever it has.  The runner will mark the status as timeout if needed.
     result = grade(ctx.expected_flag, flag)
     ctx.submission = flag
     ctx.submission_correct = bool(result["pass_"])

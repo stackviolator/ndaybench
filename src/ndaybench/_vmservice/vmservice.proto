@@ -7,7 +7,6 @@ package vmservice;
 option go_package = "vmservice";
 
 import "google/protobuf/empty.proto";
-import "google/protobuf/struct.proto";
 
 service VM {
     // CreateVM will create the virtual machine with the configuration in the
