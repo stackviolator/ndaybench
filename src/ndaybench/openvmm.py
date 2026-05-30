@@ -55,6 +55,7 @@ from google.protobuf import empty_pb2
 
 from ._vmservice import vmservice_pb2 as pb
 from ._vmservice import vmservice_pb2_grpc as pbg
+from .host import CmdResult, Host
 
 
 def utcnow_iso() -> str:
@@ -124,8 +125,9 @@ class OpenVmmConfig:
     def host_ip(self) -> str:
         return f"{self.subnet}.1"
 
-    def _ssh_base(self) -> list[str]:
-        return ["ssh", *self.ssh_opts, f"{self.ssh_user}@{self.host}"]
+    def transport(self) -> Host:
+        """The typed SSH transport for this host."""
+        return Host(name=self.host, user=self.ssh_user, ssh_opts=self.ssh_opts)
 
 
 @dataclass
@@ -155,31 +157,13 @@ class OpenVmmVm:
 class OpenVmmClient:
     config: OpenVmmConfig = field(default_factory=OpenVmmConfig)
 
-    # --- host plumbing ----------------------------------------------------
+    # --- host plumbing (delegates to the typed Host transport) ------------
 
-    def _host_run(self, cmd: str, *, timeout: int = 60, check: bool = True):
-        proc = subprocess.run(
-            [*self.config._ssh_base(), cmd],
-            capture_output=True, text=True, timeout=timeout, check=False,
-        )
-        if check and proc.returncode != 0:
-            raise OpenVmmError(
-                f"host cmd failed (rc={proc.returncode}): {cmd!r}\n"
-                f"stdout: {proc.stdout}\nstderr: {proc.stderr}"
-            )
-        return proc
+    def _host_run(self, cmd: str, *, timeout: int = 60, check: bool = True) -> CmdResult:
+        return self.config.transport().run(cmd, timeout=timeout, check=check)
 
-    def _host_script(self, script: str, *, timeout: int = 180, check: bool = True):
-        proc = subprocess.run(
-            [*self.config._ssh_base(), "bash", "-s"],
-            input=script, capture_output=True, text=True, timeout=timeout, check=False,
-        )
-        if check and proc.returncode != 0:
-            raise OpenVmmError(
-                f"host script failed (rc={proc.returncode})\n"
-                f"stdout: {proc.stdout}\nstderr: {proc.stderr}"
-            )
-        return proc
+    def _host_script(self, script: str, *, timeout: int = 180, check: bool = True) -> CmdResult:
+        return self.config.transport().script(script, timeout=timeout, check=check)
 
     # --- network ----------------------------------------------------------
 
@@ -278,11 +262,7 @@ sleep 1
         subprocess.run(["pkill", "-f", f"ssh.*-L 127.0.0.1:{vm.grpc_port}:"],
                        capture_output=True)
         time.sleep(0.5)
-        vm._fwd = subprocess.Popen(
-            [*c._ssh_base()[:-1], "-N", "-T",
-             "-L", f"127.0.0.1:{vm.grpc_port}:127.0.0.1:{vm.grpc_port}",
-             f"{c.ssh_user}@{c.host}"]
-        )
+        vm._fwd = c.transport().forward(vm.grpc_port, f"127.0.0.1:{vm.grpc_port}")
         time.sleep(3)
 
     def _teardown_process(self, vm: OpenVmmVm) -> None:

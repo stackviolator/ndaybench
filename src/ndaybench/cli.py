@@ -42,11 +42,11 @@ def sweep(
     runs: int = typer.Option(1, help="Total number of runs to launch."),
     parallelism: int = typer.Option(1, help="Max concurrent runs."),
     agent: str = typer.Option("stub", help="Agent name."),
-    proxmox_host: str = typer.Option("p620-1", help="Proxmox host name or IP."),
+    host: str = typer.Option("p620-1", help="OpenVMM host name or IP."),
     budget_seconds: int | None = typer.Option(None, "--budget"),
     recipes_dir: Path = typer.Option(Path("recipes"), help="Directory of recipe YAMLs."),
 ) -> None:
-    """Run TASK multiple times in parallel.  Central VMID allocator."""
+    """Run TASK multiple times in parallel (port-pool allocator)."""
     from .sweep import sweep as _sweep
     results = _sweep(
         task,
@@ -54,7 +54,7 @@ def sweep(
         runs=runs,
         parallelism=parallelism,
         budget_seconds=budget_seconds,
-        proxmox_host=proxmox_host,
+        host=host,
         recipes_dir=recipes_dir,
     )
     passed = sum(1 for r in results if r.get("status") == "passed")
